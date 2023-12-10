@@ -1,0 +1,4 @@
+{
+  "sftp_servers": ["localhost:2222", "localhost:3333", "localhost:4444"],
+  "private_key_path": "config/keys/sftp-user-key"
+}
