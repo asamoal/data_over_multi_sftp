@@ -163,3 +163,4 @@ cython_debug/
 logs/
 config/keys/*
 
+qodana.yaml

@@ -1,7 +1,9 @@
 {
+  "max_retries": 3,
+  "backoff_base": 10,
   "sftp_servers": ["localhost:2222", "localhost:3333", "localhost:4444"],
   "sftp_user": "user",
   "private_key_path": "config/keys/sftp-user-key",
   "remote_dir": "upload/",
-  "locations" : ["/Users/leslieasamoa/CrushDrive/fake_data_generator/20231201-1236707lak-account-cords-gen1", "/Users/leslieasamoa/CrushDrive/fake_data_generator/20231201-1236707lak-account-cords-gen2"]
+  "locations" : ["/Users/leslieasamoa/CrushDrive/fake_data_generator/20231201-1236707lak-account-cords-gen1", "/Users/leslieasamoa/CrushDrive/fake_data_generator/20231201-1236707lak-account-cords-gen2", "/Users/leslieasamoa/CrushDrive/fake_data_generator/20231201-1236707lak-account-cords-gen2"]
 }
