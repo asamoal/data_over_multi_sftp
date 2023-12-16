@@ -29,37 +29,45 @@ manifest_logger.setLevel(logging.INFO)
 
 # Set up argument parser
 parser = CustomArgumentParser(description="Send files to multiple sftp servers")
-# parser = argparse.ArgumentParser(description="Send files to multiple sftp servers")
+parser.add_argument('--config_file', default=None, help="Config file path")
+parser.add_argument('--user', default=None, help="Optionally overwrite the sftp_user for sftp in the config file")
+parser.add_argument('--remote_dir', default=None, help="Optionally overwrite the remote_dir in the config file")
 parser.add_argument('locations', nargs='*', help="Locations of files/folders to transfer")
-parser.add_argument('--user', default=None, help="Optionally provide the Username for sftp, or setup the config file")
-parser.add_argument('--remote_dir', default=None, help="Optionally supply the remote directory to put the files, "
-                                                       "or setup the config file")
-parser.add_argument('--config_file', default='config/config.json', help="Config file path")
 
 args = parser.parse_args()
 
-# it also makes sense to check if the expected arguments are actually provided
-expected_args = [args.locations]
-if not all(expected_args):
-    parser.error("Unexpected set of arguments, please provide at least "
-                 "location(s) of file(s)/folder(s) to transfer.")
+config_file_path = args.config_file or 'config/config.json'  # Default config file path is config/config.json
 
-with open('config/config.json') as f:
+with open(config_file_path) as f:
     config = json.load(f)
 
-if args.user is None:
-    args.user = config.get('sftp_user')
-
-if args.remote_dir is None:
-    args.remote_dir = config.get('remote_dir')
-
 sftp_servers = config.get('sftp_servers')
-sftp_servers_cycle = itertools.cycle(sftp_servers)
+sftp_user = args.user or config.get('sftp_user')
 private_key_path = config.get('private_key_path')
+remote_dir = args.remote_dir or config.get('remote_dir')
+
+# Checks for sftp_servers, sftp_user, private_key_path and remote_dir from config and command line
+if not sftp_servers or len(sftp_servers) < 2 or not sftp_user or not private_key_path or not remote_dir:
+    parser.error("Some required fields are missing or insufficient in the config file or command line. "
+                 "Please ensure to provide the 'sftp_servers' with more than one server, "
+                 "'sftp_user', 'private_key_path', and 'remote_dir'.")
+
+locations = config.get('locations', [])
+
+# Check if locations are provided either in config file or as command-line args
+if not locations:
+    locations = args.locations
+
+if not locations:
+    parser.error("No locations found. Please provide locations either via the config file "
+                 "or as command line arguments.")
+
+# Enable our ability to cycle through the SFTP Servers
+sftp_servers_cycle = itertools.cycle(sftp_servers)
 private_key = paramiko.RSAKey(filename=private_key_path)
 
 
-def upload_file(server_address, user, private_key, location, remote_dir):
+def upload_file(server_address, user, private_key, location, remote_dir, max_retries=3):
     server, port = server_address.split(":")
     port = int(port)
     file_count = 0
@@ -70,43 +78,48 @@ def upload_file(server_address, user, private_key, location, remote_dir):
         manifest_logger.info(msg)
         return (False, location, server, port, file_count)
 
-    try:
-        logger.info(f'Uploading to SFTP Node:{server} on port:{port} with user: {user}')
-        transport = paramiko.Transport((server, port))
-        transport.connect(username=user, pkey=private_key)
-        sftp = transport.open_sftp_client()
+    retries = 0
+    while retries < max_retries:
+        try:
+            logger.info(f'Uploading to SFTP Node:{server} on port:{port} with user: {user}')
+            transport = paramiko.Transport((server, port))
+            transport.connect(username=user, pkey=private_key)
+            sftp = transport.open_sftp_client()
 
-        if os.path.isfile(location):
-            manifest_logger.info(f"Starting to upload {location} to server {server}:{port}")
-            sftp.put(location, os.path.join(remote_dir, os.path.basename(location)))
-            manifest_logger.info(f"Upload of {location} to {server}:{port} successful.")
-            file_count += 1
+            if os.path.isfile(location):
+                manifest_logger.info(f"Starting to upload {location} to server {server}:{port}")
+                sftp.put(location, os.path.join(remote_dir, os.path.basename(location)))
+                manifest_logger.info(f"Upload of {location} to {server}:{port} successful.")
+                file_count += 1
 
-        elif os.path.isdir(location):
-            for root, dirs, files in os.walk(location):
-                for filename in files:
-                    local_path = os.path.join(root, filename)
-                    remote_path = os.path.join(remote_dir, os.path.basename(local_path))
-                    manifest_logger.info(f"Starting to upload {local_path} to server {server}:{port}")
-                    sftp.put(local_path, remote_path)
-                    manifest_logger.info(f"Upload of {local_path} to {server}:{port} successful.")
-                    file_count += 1
-        sftp.close()
-        transport.close()
-        return (True, location, server, port, file_count)
+            elif os.path.isdir(location):
+                for root, dirs, files in os.walk(location):
+                    for filename in files:
+                        local_path = os.path.join(root, filename)
+                        remote_path = os.path.join(remote_dir, os.path.basename(local_path))
+                        manifest_logger.info(f"Starting to upload {local_path} to server {server}:{port}")
+                        sftp.put(local_path, remote_path)
+                        manifest_logger.info(f"Upload of {local_path} to {server}:{port} successful.")
+                        file_count += 1
+            sftp.close()
+            transport.close()
+            return (True, location, server, port, file_count)
 
-    except Exception as e:
-        error_msg = f"Failed to transfer {location} to {server}:{port}. Error: {str(e)}"
-        logger.error(error_msg)
-        manifest_logger.info(error_msg)
-        return (False, location, server, port, file_count)
+        except Exception as e:
+            retries += 1
+            error_msg = f"Failed to transfer {location} to {server}:{port}. Retry attempt: {retries}. Error: {str(e)}"
+            logger.error(error_msg)
+            manifest_logger.info(error_msg)
+
+    # if reached here, it means all retry attempts have failed
+    return (False, location, server, port, file_count)
 
 
 successful_uploads = []
 unsuccessful_uploads = []
 total_files = 0
 
-for location in args.locations:
+for location in locations:
     success, processed_location, server, port, file_count = upload_file(next(sftp_servers_cycle), args.user,
                                                                         private_key, location, args.remote_dir)
     total_files += file_count
