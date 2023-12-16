@@ -6,6 +6,14 @@ import itertools
 import json
 import logging
 
+
+class CustomArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        sys.stderr.write('error: %s\n' % message)
+        self.print_help()
+        sys.exit(2)
+
+
 if not os.path.exists('logs'):
     os.makedirs('logs')
 
@@ -19,20 +27,37 @@ manifest_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
 manifest_logger.addHandler(manifest_handler)
 manifest_logger.setLevel(logging.INFO)
 
-parser = argparse.ArgumentParser(description="Send files to multiple sftp servers")
+# Set up argument parser
+parser = CustomArgumentParser(description="Send files to multiple sftp servers")
+# parser = argparse.ArgumentParser(description="Send files to multiple sftp servers")
 parser.add_argument('locations', nargs='*', help="Locations of files/folders to transfer")
-parser.add_argument('--user', default='sftpuser', help="Username for sftp")
-parser.add_argument('--remote_dir', default='/remote_directory/', help="Remote directory to put the files")
+parser.add_argument('--user', default=None, help="Optionally provide the Username for sftp, or setup the config file")
+parser.add_argument('--remote_dir', default=None, help="Optionally supply the remote directory to put the files, "
+                                                       "or setup the config file")
+parser.add_argument('--config_file', default='config/config.json', help="Config file path")
 
 args = parser.parse_args()
 
+# it also makes sense to check if the expected arguments are actually provided
+expected_args = [args.locations]
+if not all(expected_args):
+    parser.error("Unexpected set of arguments, please provide at least "
+                 "location(s) of file(s)/folder(s) to transfer.")
+
 with open('config/config.json') as f:
     config = json.load(f)
+
+if args.user is None:
+    args.user = config.get('sftp_user')
+
+if args.remote_dir is None:
+    args.remote_dir = config.get('remote_dir')
 
 sftp_servers = config.get('sftp_servers')
 sftp_servers_cycle = itertools.cycle(sftp_servers)
 private_key_path = config.get('private_key_path')
 private_key = paramiko.RSAKey(filename=private_key_path)
+
 
 def upload_file(server_address, user, private_key, location, remote_dir):
     server, port = server_address.split(":")
@@ -76,12 +101,14 @@ def upload_file(server_address, user, private_key, location, remote_dir):
         manifest_logger.info(error_msg)
         return (False, location, server, port, file_count)
 
+
 successful_uploads = []
 unsuccessful_uploads = []
 total_files = 0
 
 for location in args.locations:
-    success, processed_location, server, port, file_count = upload_file(next(sftp_servers_cycle), args.user, private_key, location, args.remote_dir)
+    success, processed_location, server, port, file_count = upload_file(next(sftp_servers_cycle), args.user,
+                                                                        private_key, location, args.remote_dir)
     total_files += file_count
     if success:
         successful_uploads.append((processed_location, server, port, file_count))
@@ -91,8 +118,9 @@ for location in args.locations:
 print(f"File transfer execution. {len(successful_uploads)} uploads successful to the following servers:")
 for location, server, port, file_count in successful_uploads:
     print(f"- {location} containing {file_count} files was successfully uploaded to {server}:{port}")
+    print("Please check 'logs/upload_manifest.log' for more details.")
 print(f"{len(unsuccessful_uploads)} uploads failed:")
 for location, server, port in unsuccessful_uploads:
     print(f"- Uploading {location} to {server}:{port} failed.")
+    print("Please check 'logs/sftp_transfers.log' for more details.")
 print(f"Total Number of files transferred: {total_files}")
-print("Please check 'logs/sftp_transfers.log' for more details.")
