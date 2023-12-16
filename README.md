@@ -1,6 +1,16 @@
 # Data Over Multiple SFTP Project
 
-This Python project is intended to send files over multiple SFTP servers in a round-robin fashion based on a given configuration file.
+This Python project is intended to send files over multiple SFTP servers in a round-robin fashion based on a given configuration file. It employs various error handling and resilience techniques against server failures during the file upload process. 
+
+## Improvements
+
+- Retry Mechanism: If a file upload fails, the script will attempt to upload the same file to the next server in the sequence. The maximum number of retries and the servers in the round-robin sequence can all be adjusted in the configuration file.
+
+- Backoff Penalty: If an upload to a server fails, the script will wait for a certain period (backoff penalty) before the next upload attempt. The duration of the backoff penalty increases with each failed attempt on the same server. The base value for the backoff penalty can be configured in the configuration file.
+
+- Improved Server Selection: The script now ensures that it does not attempt uploads to the same server consecutively, unless it has successfully uploaded on all other servers.
+
+- Better Logging: More comprehensive logging messages have been added for improved debugging visibility.
 
 ## Description
 
@@ -23,9 +33,33 @@ To install the required dependencies, run the following command in your terminal
 
 ## Configuration
 
+New parameters added to the `config.json` file:
+
+- `max_retries`: The maximum number of times the script should retry an upload to a server before moving onto the next server.
+
+- `backoff_base`: The base number of seconds for the backoff penalty. This value is doubled after each subsequent failed retry on same server.
+
 You need to set up a config.json file in this format:
 
-``json { "sftp_servers": ["localhost:2222", "localhost:3333", "localhost:4444"], "sftp_user": "user", "private_key_path": "config/keys/sftp-user-key", "remote_dir": "upload/", "locations" : ["/path/to/folder1", "/path/to/folder2"] }``
+```json 
+{ 
+ "backoff_base": 10,
+  "locations": [
+    "/path/to/folder1",
+    "/path/to/folder2",
+    "/path/to/folder3"
+  ],
+  "max_retries": 3,
+  "private_key_path": "config/keys/sftp-user-key",
+  "remote_dir": "upload/",
+  "sftp_servers": [
+    "localhost:2222",
+    "localhost:3333",
+    "localhost:4444"
+  ],
+  "sftp_user": "user"
+}
+  ```
 
 Replace the values with your actual SFTP server addresses and local file paths.
 
